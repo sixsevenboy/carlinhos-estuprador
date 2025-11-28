@@ -1,0 +1,785 @@
+--[[
+    Clean Drawing UI Library
+    Features:
+    - Cantos arredondados simulados
+    - Abas horizontais rotacionáveis
+    - Design semi-transparente
+    - Totalmente customizável
+]]
+
+local DrawingUI = {}
+DrawingUI.__index = DrawingUI
+
+-- ═══════════════════════════════════════════════════════════
+-- CONFIGURAÇÕES DE CORES E ESTILO
+-- ═══════════════════════════════════════════════════════════
+
+local Theme = {
+    -- Cores principais
+    Background = Color3.fromRGB(20, 20, 25),
+    BackgroundSecondary = Color3.fromRGB(30, 30, 38),
+    Accent = Color3.fromRGB(88, 101, 242), -- Discord-like blue
+    AccentHover = Color3.fromRGB(108, 121, 255),
+    
+    -- Texto
+    TextPrimary = Color3.fromRGB(255, 255, 255),
+    TextSecondary = Color3.fromRGB(180, 180, 190),
+    TextMuted = Color3.fromRGB(120, 120, 130),
+    
+    -- Bordas
+    Border = Color3.fromRGB(50, 50, 60),
+    BorderAccent = Color3.fromRGB(88, 101, 242),
+    
+    -- Transparência (0 = invisível, 1 = opaco)
+    BackgroundTransparency = 0.92,
+    TabBarTransparency = 0.88,
+    TabTransparency = 0.85,
+    TabActiveTransparency = 0.95,
+    
+    -- Dimensões
+    CornerRadius = 8,
+    TabHeight = 32,
+    TabPadding = 6,
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- UTILITÁRIOS PARA DESENHO
+-- ═══════════════════════════════════════════════════════════
+
+local DrawingObjects = {}
+
+local function CreateDrawing(class, properties)
+    local obj = Drawing.new(class)
+    for prop, value in pairs(properties or {}) do
+        obj[prop] = value
+    end
+    table.insert(DrawingObjects, obj)
+    return obj
+end
+
+local function DestroyAll()
+    for _, obj in ipairs(DrawingObjects) do
+        if obj then
+            obj:Remove()
+        end
+    end
+    DrawingObjects = {}
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- SISTEMA DE CANTOS ARREDONDADOS (Rounded Corners)
+-- ═══════════════════════════════════════════════════════════
+
+local RoundedRect = {}
+RoundedRect.__index = RoundedRect
+
+function RoundedRect.new(config)
+    local self = setmetatable({}, RoundedRect)
+    
+    self.Position = config.Position or Vector2.new(0, 0)
+    self.Size = config.Size or Vector2.new(100, 100)
+    self.Color = config.Color or Theme.Background
+    self.Transparency = config.Transparency or 1
+    self.Radius = config.Radius or Theme.CornerRadius
+    self.Filled = config.Filled ~= false
+    self.Visible = config.Visible ~= false
+    self.BorderColor = config.BorderColor
+    self.BorderThickness = config.BorderThickness or 1
+    
+    self._objects = {}
+    self:_create()
+    
+    return self
+end
+
+function RoundedRect:_create()
+    -- Limpa objetos antigos
+    for _, obj in ipairs(self._objects) do
+        obj:Remove()
+    end
+    self._objects = {}
+    
+    local x, y = self.Position.X, self.Position.Y
+    local w, h = self.Size.X, self.Size.Y
+    local r = math.min(self.Radius, w/2, h/2)
+    
+    -- ═══════════════════════════════════════════════════════
+    -- Preenchimento central (3 retângulos formando o corpo)
+    -- ═══════════════════════════════════════════════════════
+    
+    -- Retângulo horizontal central
+    local centerHorizontal = CreateDrawing("Square", {
+        Position = Vector2.new(x, y + r),
+        Size = Vector2.new(w, h - 2*r),
+        Color = self.Color,
+        Transparency = self.Transparency,
+        Filled = self.Filled,
+        Visible = self.Visible
+    })
+    table.insert(self._objects, centerHorizontal)
+    
+    -- Retângulo vertical esquerdo-topo
+    local topRect = CreateDrawing("Square", {
+        Position = Vector2.new(x + r, y),
+        Size = Vector2.new(w - 2*r, r),
+        Color = self.Color,
+        Transparency = self.Transparency,
+        Filled = self.Filled,
+        Visible = self.Visible
+    })
+    table.insert(self._objects, topRect)
+    
+    -- Retângulo vertical direito-baixo
+    local bottomRect = CreateDrawing("Square", {
+        Position = Vector2.new(x + r, y + h - r),
+        Size = Vector2.new(w - 2*r, r),
+        Color = self.Color,
+        Transparency = self.Transparency,
+        Filled = self.Filled,
+        Visible = self.Visible
+    })
+    table.insert(self._objects, bottomRect)
+    
+    -- ═══════════════════════════════════════════════════════
+    -- 4 círculos nos cantos
+    -- ═══════════════════════════════════════════════════════
+    
+    local corners = {
+        {x + r, y + r},         -- Top-left
+        {x + w - r, y + r},     -- Top-right
+        {x + r, y + h - r},     -- Bottom-left
+        {x + w - r, y + h - r}  -- Bottom-right
+    }
+    
+    for _, corner in ipairs(corners) do
+        local circle = CreateDrawing("Circle", {
+            Position = Vector2.new(corner[1], corner[2]),
+            Radius = r,
+            Color = self.Color,
+            Transparency = self.Transparency,
+            Filled = self.Filled,
+            Visible = self.Visible,
+            NumSides = 30 -- Suavidade do círculo
+        })
+        table.insert(self._objects, circle)
+    end
+    
+    -- ═══════════════════════════════════════════════════════
+    -- Borda (se especificada)
+    -- ═══════════════════════════════════════════════════════
+    
+    if self.BorderColor then
+        self:_createBorder()
+    end
+end
+
+function RoundedRect:_createBorder()
+    local x, y = self.Position.X, self.Position.Y
+    local w, h = self.Size.X, self.Size.Y
+    local r = math.min(self.Radius, w/2, h/2)
+    
+    -- Linhas horizontais (topo e base)
+    local topLine = CreateDrawing("Line", {
+        From = Vector2.new(x + r, y),
+        To = Vector2.new(x + w - r, y),
+        Color = self.BorderColor,
+        Transparency = self.Transparency,
+        Thickness = self.BorderThickness,
+        Visible = self.Visible
+    })
+    table.insert(self._objects, topLine)
+    
+    local bottomLine = CreateDrawing("Line", {
+        From = Vector2.new(x + r, y + h),
+        To = Vector2.new(x + w - r, y + h),
+        Color = self.BorderColor,
+        Transparency = self.Transparency,
+        Thickness = self.BorderThickness,
+        Visible = self.Visible
+    })
+    table.insert(self._objects, bottomLine)
+    
+    -- Linhas verticais (esquerda e direita)
+    local leftLine = CreateDrawing("Line", {
+        From = Vector2.new(x, y + r),
+        To = Vector2.new(x, y + h - r),
+        Color = self.BorderColor,
+        Transparency = self.Transparency,
+        Thickness = self.BorderThickness,
+        Visible = self.Visible
+    })
+    table.insert(self._objects, leftLine)
+    
+    local rightLine = CreateDrawing("Line", {
+        From = Vector2.new(x + w, y + r),
+        To = Vector2.new(x + w, y + h - r),
+        Color = self.BorderColor,
+        Transparency = self.Transparency,
+        Thickness = self.BorderThickness,
+        Visible = self.Visible
+    })
+    table.insert(self._objects, rightLine)
+    
+    -- Arcos nos cantos (simulados com círculos parciais)
+    local cornerAngles = {
+        {x + r, y + r, math.pi, math.pi * 1.5},         -- Top-left
+        {x + w - r, y + r, math.pi * 1.5, math.pi * 2}, -- Top-right
+        {x + r, y + h - r, math.pi * 0.5, math.pi},     -- Bottom-left
+        {x + w - r, y + h - r, 0, math.pi * 0.5}        -- Bottom-right
+    }
+    
+    for _, corner in ipairs(cornerAngles) do
+        local cx, cy, startAngle, endAngle = corner[1], corner[2], corner[3], corner[4]
+        local segments = 8
+        local angleStep = (endAngle - startAngle) / segments
+        
+        for i = 0, segments - 1 do
+            local angle1 = startAngle + angleStep * i
+            local angle2 = startAngle + angleStep * (i + 1)
+            
+            local arcLine = CreateDrawing("Line", {
+                From = Vector2.new(cx + math.cos(angle1) * r, cy + math.sin(angle1) * r),
+                To = Vector2.new(cx + math.cos(angle2) * r, cy + math.sin(angle2) * r),
+                Color = self.BorderColor,
+                Transparency = self.Transparency,
+                Thickness = self.BorderThickness,
+                Visible = self.Visible
+            })
+            table.insert(self._objects, arcLine)
+        end
+    end
+end
+
+function RoundedRect:SetVisible(visible)
+    self.Visible = visible
+    for _, obj in ipairs(self._objects) do
+        obj.Visible = visible
+    end
+end
+
+function RoundedRect:SetPosition(pos)
+    self.Position = pos
+    self:_create()
+end
+
+function RoundedRect:Destroy()
+    for _, obj in ipairs(self._objects) do
+        obj:Remove()
+    end
+    self._objects = {}
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- CLASSE PRINCIPAL DA UI
+-- ═══════════════════════════════════════════════════════════
+
+function DrawingUI.new(config)
+    local self = setmetatable({}, DrawingUI)
+    
+    -- Configurações
+    self.Title = config.Title or "Clean UI"
+    self.Position = config.Position or Vector2.new(100, 100)
+    self.Size = config.Size or Vector2.new(450, 350)
+    self.TabBarRotation = config.TabBarRotation or 0 -- Graus de rotação
+    
+    -- Estado
+    self.Visible = true
+    self.Tabs = {}
+    self.ActiveTab = nil
+    self.Dragging = false
+    self.DragOffset = Vector2.new(0, 0)
+    
+    -- Objetos de desenho
+    self._elements = {}
+    
+    self:_build()
+    self:_setupInput()
+    
+    return self
+end
+
+function DrawingUI:_build()
+    self:_clear()
+    
+    local x, y = self.Position.X, self.Position.Y
+    local w, h = self.Size.X, self.Size.Y
+    
+    -- ═══════════════════════════════════════════════════════
+    -- SOMBRA DO MENU (efeito de profundidade)
+    -- ═══════════════════════════════════════════════════════
+    
+    self._shadow = RoundedRect.new({
+        Position = Vector2.new(x + 4, y + 4),
+        Size = Vector2.new(w, h),
+        Color = Color3.fromRGB(0, 0, 0),
+        Transparency = 0.3,
+        Radius = Theme.CornerRadius + 2
+    })
+    table.insert(self._elements, self._shadow)
+    
+    -- ═══════════════════════════════════════════════════════
+    -- FUNDO PRINCIPAL
+    -- ═══════════════════════════════════════════════════════
+    
+    self._background = RoundedRect.new({
+        Position = Vector2.new(x, y),
+        Size = Vector2.new(w, h),
+        Color = Theme.Background,
+        Transparency = Theme.BackgroundTransparency,
+        Radius = Theme.CornerRadius,
+        BorderColor = Theme.Border,
+        BorderThickness = 1
+    })
+    table.insert(self._elements, self._background)
+    
+    -- ═══════════════════════════════════════════════════════
+    -- BARRA DE TÍTULO
+    -- ═══════════════════════════════════════════════════════
+    
+    self._titleBar = RoundedRect.new({
+        Position = Vector2.new(x + 2, y + 2),
+        Size = Vector2.new(w - 4, 36),
+        Color = Theme.BackgroundSecondary,
+        Transparency = 0.95,
+        Radius = Theme.CornerRadius - 1
+    })
+    table.insert(self._elements, self._titleBar)
+    
+    -- Texto do título
+    self._titleText = CreateDrawing("Text", {
+        Position = Vector2.new(x + 16, y + 10),
+        Text = self.Title,
+        Size = 16,
+        Font = 2, -- UI
+        Color = Theme.TextPrimary,
+        Transparency = 1,
+        Visible = true,
+        Center = false
+    })
+    table.insert(self._elements, self._titleText)
+    
+    -- Ícone decorativo (3 círculos estilo macOS)
+    local circleColors = {
+        Color3.fromRGB(255, 95, 87),   -- Vermelho
+        Color3.fromRGB(255, 189, 46),  -- Amarelo
+        Color3.fromRGB(39, 201, 63)    -- Verde
+    }
+    
+    for i, color in ipairs(circleColors) do
+        local decorCircle = CreateDrawing("Circle", {
+            Position = Vector2.new(x + w - 20 - (i-1) * 18, y + 20),
+            Radius = 6,
+            Color = color,
+            Transparency = 0.9,
+            Filled = true,
+            Visible = true,
+            NumSides = 20
+        })
+        table.insert(self._elements, decorCircle)
+    end
+    
+    -- ═══════════════════════════════════════════════════════
+    -- LINHA SEPARADORA
+    -- ═══════════════════════════════════════════════════════
+    
+    self._separator = CreateDrawing("Line", {
+        From = Vector2.new(x + 12, y + 42),
+        To = Vector2.new(x + w - 12, y + 42),
+        Color = Theme.Border,
+        Transparency = 0.5,
+        Thickness = 1,
+        Visible = true
+    })
+    table.insert(self._elements, self._separator)
+    
+    -- ═══════════════════════════════════════════════════════
+    -- BARRA DE ABAS (ROTACIONÁVEL)
+    -- ═══════════════════════════════════════════════════════
+    
+    self:_buildTabBar()
+    
+    -- ═══════════════════════════════════════════════════════
+    -- ÁREA DE CONTEÚDO
+    -- ═══════════════════════════════════════════════════════
+    
+    local contentY = y + 48 + Theme.TabHeight + 12
+    local contentH = h - (contentY - y) - 12
+    
+    self._contentArea = RoundedRect.new({
+        Position = Vector2.new(x + 8, contentY),
+        Size = Vector2.new(w - 16, contentH),
+        Color = Theme.BackgroundSecondary,
+        Transparency = 0.7,
+        Radius = 6,
+        BorderColor = Theme.Border,
+        BorderThickness = 1
+    })
+    table.insert(self._elements, self._contentArea)
+    
+    -- Texto placeholder do conteúdo
+    self._contentText = CreateDrawing("Text", {
+        Position = Vector2.new(x + w/2, contentY + contentH/2 - 8),
+        Text = "Selecione uma aba",
+        Size = 14,
+        Font = 2,
+        Color = Theme.TextMuted,
+        Transparency = 0.8,
+        Visible = true,
+        Center = true
+    })
+    table.insert(self._elements, self._contentText)
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- BARRA DE ABAS ROTACIONÁVEL
+-- ═══════════════════════════════════════════════════════════
+
+function DrawingUI:_buildTabBar()
+    local x, y = self.Position.X, self.Position.Y
+    local w = self.Size.X
+    
+    local tabBarY = y + 48
+    local tabBarWidth = w - 16
+    local tabBarHeight = Theme.TabHeight + 8
+    local tabBarX = x + 8
+    
+    -- Calcular centro para rotação
+    local centerX = tabBarX + tabBarWidth / 2
+    local centerY = tabBarY + tabBarHeight / 2
+    
+    -- Fundo da barra de abas
+    self._tabBarBg = RoundedRect.new({
+        Position = Vector2.new(tabBarX, tabBarY),
+        Size = Vector2.new(tabBarWidth, tabBarHeight),
+        Color = Color3.fromRGB(25, 25, 32),
+        Transparency = Theme.TabBarTransparency,
+        Radius = 6
+    })
+    table.insert(self._elements, self._tabBarBg)
+    
+    -- Indicador de rotação
+    local rotText = string.format("↻ %.0f°", self.TabBarRotation)
+    self._rotationIndicator = CreateDrawing("Text", {
+        Position = Vector2.new(x + w - 50, tabBarY + 4),
+        Text = rotText,
+        Size = 10,
+        Font = 2,
+        Color = Theme.TextMuted,
+        Transparency = 0.6,
+        Visible = true,
+        Center = false
+    })
+    table.insert(self._elements, self._rotationIndicator)
+    
+    -- Renderizar abas
+    self:_renderTabs()
+end
+
+function DrawingUI:_renderTabs()
+    -- Limpar abas existentes
+    if self._tabElements then
+        for _, elem in ipairs(self._tabElements) do
+            if elem.Destroy then
+                elem:Destroy()
+            elseif elem.Remove then
+                elem:Remove()
+            end
+        end
+    end
+    self._tabElements = {}
+    
+    local x, y = self.Position.X, self.Position.Y
+    local w = self.Size.X
+    
+    local tabBarY = y + 48 + 4
+    local startX = x + 12
+    local tabSpacing = 6
+    local currentX = startX
+    
+    -- Centro de rotação
+    local centerX = x + w / 2
+    local centerY = tabBarY + Theme.TabHeight / 2
+    local rotation = math.rad(self.TabBarRotation)
+    
+    for i, tab in ipairs(self.Tabs) do
+        local tabWidth = tab.Width or 80
+        local isActive = (self.ActiveTab == tab.Name)
+        
+        -- Calcular posição rotacionada
+        local tabCenterX = currentX + tabWidth / 2
+        local tabCenterY = tabBarY + Theme.TabHeight / 2
+        
+        -- Rotação em torno do centro da barra
+        local dx = tabCenterX - centerX
+        local dy = tabCenterY - centerY
+        local rotatedX = centerX + dx * math.cos(rotation) - dy * math.sin(rotation)
+        local rotatedY = centerY + dx * math.sin(rotation) + dy * math.cos(rotation)
+        
+        -- Ajustar posição final (considerar que é o centro)
+        local finalX = rotatedX - tabWidth / 2
+        local finalY = rotatedY - Theme.TabHeight / 2
+        
+        -- Fundo da aba
+        local tabBg = RoundedRect.new({
+            Position = Vector2.new(finalX, finalY),
+            Size = Vector2.new(tabWidth, Theme.TabHeight),
+            Color = isActive and Theme.Accent or Theme.BackgroundSecondary,
+            Transparency = isActive and Theme.TabActiveTransparency or Theme.TabTransparency,
+            Radius = 5,
+            BorderColor = isActive and Theme.BorderAccent or nil,
+            BorderThickness = 1
+        })
+        table.insert(self._tabElements, tabBg)
+        
+        -- Glow effect para aba ativa
+        if isActive then
+            local glow = RoundedRect.new({
+                Position = Vector2.new(finalX - 2, finalY - 2),
+                Size = Vector2.new(tabWidth + 4, Theme.TabHeight + 4),
+                Color = Theme.Accent,
+                Transparency = 0.15,
+                Radius = 7
+            })
+            table.insert(self._tabElements, glow)
+        end
+        
+        -- Texto da aba
+        local tabText = CreateDrawing("Text", {
+            Position = Vector2.new(finalX + tabWidth/2, finalY + Theme.TabHeight/2 - 7),
+            Text = tab.Name,
+            Size = 13,
+            Font = 2,
+            Color = isActive and Theme.TextPrimary or Theme.TextSecondary,
+            Transparency = 1,
+            Visible = true,
+            Center = true
+        })
+        table.insert(self._tabElements, tabText)
+        
+        -- Ícone da aba (se tiver)
+        if tab.Icon then
+            local icon = CreateDrawing("Text", {
+                Position = Vector2.new(finalX + 10, finalY + Theme.TabHeight/2 - 7),
+                Text = tab.Icon,
+                Size = 12,
+                Font = 2,
+                Color = isActive and Theme.TextPrimary or Theme.TextMuted,
+                Transparency = 1,
+                Visible = true,
+                Center = false
+            })
+            table.insert(self._tabElements, icon)
+        end
+        
+        -- Guardar bounds para detecção de clique
+        tab._bounds = {
+            X1 = finalX,
+            Y1 = finalY,
+            X2 = finalX + tabWidth,
+            Y2 = finalY + Theme.TabHeight
+        }
+        
+        currentX = currentX + tabWidth + tabSpacing
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- MÉTODOS PÚBLICOS
+-- ═══════════════════════════════════════════════════════════
+
+function DrawingUI:AddTab(name, config)
+    config = config or {}
+    local tab = {
+        Name = name,
+        Icon = config.Icon,
+        Width = config.Width or (#name * 8 + 30),
+        Content = config.Content or {},
+        Callback = config.Callback
+    }
+    
+    table.insert(self.Tabs, tab)
+    
+    if not self.ActiveTab then
+        self.ActiveTab = name
+    end
+    
+    self:_renderTabs()
+    
+    return tab
+end
+
+function DrawingUI:SetActiveTab(name)
+    self.ActiveTab = name
+    self:_renderTabs()
+    self:_updateContent()
+    
+    -- Chamar callback se existir
+    for _, tab in ipairs(self.Tabs) do
+        if tab.Name == name and tab.Callback then
+            tab.Callback()
+        end
+    end
+end
+
+function DrawingUI:SetRotation(degrees)
+    self.TabBarRotation = degrees % 360
+    self:_build()
+end
+
+function DrawingUI:Rotate(delta)
+    self:SetRotation(self.TabBarRotation + delta)
+end
+
+function DrawingUI:_updateContent()
+    if self._contentText then
+        local tab = nil
+        for _, t in ipairs(self.Tabs) do
+            if t.Name == self.ActiveTab then
+                tab = t
+                break
+            end
+        end
+        
+        if tab then
+            self._contentText.Text = "📋 " .. tab.Name .. " - Conteúdo aqui"
+            self._contentText.Color = Theme.TextSecondary
+        end
+    end
+end
+
+function DrawingUI:_clear()
+    for _, elem in ipairs(self._elements) do
+        if elem.Destroy then
+            elem:Destroy()
+        elseif elem.Remove then
+            elem:Remove()
+        end
+    end
+    self._elements = {}
+    
+    if self._tabElements then
+        for _, elem in ipairs(self._tabElements) do
+            if elem.Destroy then
+                elem:Destroy()
+            elseif elem.Remove then
+                elem:Remove()
+            end
+        end
+        self._tabElements = {}
+    end
+end
+
+function DrawingUI:SetPosition(pos)
+    self.Position = pos
+    self:_build()
+end
+
+function DrawingUI:SetVisible(visible)
+    self.Visible = visible
+    
+    for _, elem in ipairs(self._elements) do
+        if elem.SetVisible then
+            elem:SetVisible(visible)
+        elseif elem.Visible ~= nil then
+            elem.Visible = visible
+        end
+    end
+    
+    if self._tabElements then
+        for _, elem in ipairs(self._tabElements) do
+            if elem.SetVisible then
+                elem:SetVisible(visible)
+            elseif elem.Visible ~= nil then
+                elem.Visible = visible
+            end
+        end
+    end
+end
+
+function DrawingUI:Toggle()
+    self:SetVisible(not self.Visible)
+end
+
+function DrawingUI:Destroy()
+    self:_clear()
+    
+    if self._inputConnection then
+        self._inputConnection:Disconnect()
+    end
+    if self._moveConnection then
+        self._moveConnection:Disconnect()
+    end
+    if self._releaseConnection then
+        self._releaseConnection:Disconnect()
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- SISTEMA DE INPUT
+-- ═══════════════════════════════════════════════════════════
+
+function DrawingUI:_setupInput()
+    local UserInputService = game:GetService("UserInputService")
+    local mouse = game:GetService("Players").LocalPlayer:GetMouse()
+    
+    -- Click detection
+    self._inputConnection = UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local mousePos = Vector2.new(mouse.X, mouse.Y)
+            
+            -- Check title bar for dragging
+            local x, y = self.Position.X, self.Position.Y
+            local w = self.Size.X
+            
+            if mousePos.X >= x and mousePos.X <= x + w and
+               mousePos.Y >= y and mousePos.Y <= y + 40 then
+                self.Dragging = true
+                self.DragOffset = Vector2.new(mousePos.X - x, mousePos.Y - y)
+            end
+            
+            -- Check tabs for clicking
+            for _, tab in ipairs(self.Tabs) do
+                if tab._bounds then
+                    local b = tab._bounds
+                    if mousePos.X >= b.X1 and mousePos.X <= b.X2 and
+                       mousePos.Y >= b.Y1 and mousePos.Y <= b.Y2 then
+                        self:SetActiveTab(tab.Name)
+                        break
+                    end
+                end
+            end
+        end
+        
+        -- Rotação com teclas
+        if input.KeyCode == Enum.KeyCode.Q then
+            self:Rotate(-15)
+        elseif input.KeyCode == Enum.KeyCode.E then
+            self:Rotate(15)
+        elseif input.KeyCode == Enum.KeyCode.R then
+            self:SetRotation(0) -- Reset
+        elseif input.KeyCode == Enum.KeyCode.H then
+            self:Toggle()
+        end
+    end)
+    
+    -- Drag movement
+    self._moveConnection = UserInputService.InputChanged:Connect(function(input)
+        if self.Dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local mousePos = Vector2.new(mouse.X, mouse.Y)
+            self:SetPosition(mousePos - self.DragOffset)
+        end
+    end)
+    
+    -- Release drag
+    self._releaseConnection = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            self.Dragging = false
+        end
+    end)
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- EXPORTAR BIBLIOTECA
+-- ═══════════════════════════════════════════════════════════
+
+return DrawingUI
